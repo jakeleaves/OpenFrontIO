@@ -185,11 +185,14 @@ export const MAX_HOSTED_LOBBIES = 10;
 // deadline; relisting starts a fresh one.
 export const HOSTED_LOBBY_AUTO_START_MS = 5 * 60 * 1000;
 
+// Bounds duplicate MIN/MAX_USERNAME_LENGTH, which can't be imported here:
+// validations/username.ts imports this schema, so the dependency only runs
+// one way. Keep them in step — UsernameValidation.test.ts asserts it.
 export const UsernameSchema = z
   .string()
   .regex(/^(?=.*\S)[a-zA-Z0-9_ üÜ.]+$/u)
   .min(3)
-  .max(27);
+  .max(20);
 
 export const ClanTagSchema = z
   .string()
