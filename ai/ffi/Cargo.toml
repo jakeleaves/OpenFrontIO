@@ -1,0 +1,17 @@
+[package]
+name = "openfront-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "openfront_sim_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+openfront-sim = { workspace = true }
+pyo3 = { workspace = true }
+numpy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }

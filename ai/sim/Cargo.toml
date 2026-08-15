@@ -1,0 +1,21 @@
+[package]
+name = "openfront-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bit-exact OpenFront.io deterministic simulation (Rust port of src/core)"
+
+[lib]
+name = "openfront_sim"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+byteorder = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "openfront-ai"
+version = "0.1.0"
+description = "OpenFront dominant agent — Rust sim + Python RL"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-only" }
+dependencies = [
+  "numpy>=1.26",
+  "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = ["maturin>=1.7", "pytest>=8"]
+
+[tool.maturin]
+manifest-path = "ffi/Cargo.toml"
+python-source = "python"
+module-name = "openfront_sim_ffi"
