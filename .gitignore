@@ -26,3 +26,8 @@ tests/perf/output/
 # Locally built Go binary (gen-maps uses `go run .`)
 map-generator/map-generator
 map-generator/map-generator.exe
+
+# AI training artifacts (multi-GB demos / checkpoints / metrics / logs)
+ai/fixtures/demos/
+ai/fixtures/checkpoints/
+ai/fixtures/logs/

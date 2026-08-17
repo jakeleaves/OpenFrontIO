@@ -11,7 +11,16 @@ export const VECTOR_DIM = 64;
 export const COARSE_W = 32;
 export const COARSE_H = 16;
 
-export const TROOP_FRACS = [0.1, 0.2, 0.35, 0.5, 0.75] as const;
+/** World Solo FFA: TN expand + up to 72 nation attack slots. */
+export const MAX_NATIONS = 72;
+/** Index 0 = terra nullius; 1..MAX_NATIONS = fixed nation slots. */
+export const NUM_TARGET_PLAYERS = 1 + MAX_NATIONS;
+
+/** Discrete spend labels: 1%, 2%, …, 100% of current troops (decode may bank-clamp). */
+export const TROOP_FRACS: readonly number[] = Array.from(
+  { length: 100 },
+  (_, i) => (i + 1) / 100,
+);
 
 export enum ActionType {
   NOOP = 0,
@@ -27,7 +36,6 @@ export enum ActionType {
 }
 
 export const NUM_ACTION_TYPES = 10;
-export const NUM_TARGET_PLAYERS = 2; // TN, Enemy
 export const NUM_TROOP_FRACS = TROOP_FRACS.length;
 export const NUM_BUILD_TYPES = 10;
 
@@ -75,7 +83,36 @@ export type StepInfo = {
   agentTiles: number;
   agentTroops: number;
   agentGold: number;
+  /** Number of Cities currently owned by the agent. */
+  agentCities: number;
+  /** @deprecated Prefer enemyTilesTotal — strongest single opponent tiles. */
   nationTiles: number;
+  /** Agent max troop capacity (config.maxTroops). */
+  troopCap: number;
+  /** agentTroops / troopCap. */
+  troopRatio: number;
+  /** Current troopIncreaseRate / peak rate for this cap (0–1). */
+  growthEfficiency: number;
+  /** Ratio that maximizes absolute regen for current troopCap. */
+  optimalGrowthRatio: number;
+  /** @deprecated Prefer enemyTroopsTotal — strongest single opponent troops. */
+  nationTroops: number;
+  /** Alive Nation opponents. */
+  opponentsAlive: number;
+  /** Sum of all opponent land tiles. */
+  enemyTilesTotal: number;
+  /** Sum of all opponent troops. */
+  enemyTroopsTotal: number;
+  /** Strongest alive opponent tile count. */
+  strongestEnemyTiles: number;
+  /** Strongest alive opponent troop count. */
+  strongestEnemyTroops: number;
+  /** Agent tile-rank among alive non-bot players (1 = most land). */
+  placement: number;
+  /** Transport ships owned by the agent. */
+  agentBoats: number;
+  /** Fixed opponent IDs for target slots 1..N (empty slots padded). */
+  opponentIds: string[];
 };
 
 export function noopAction(): FactorizedAction {

@@ -119,6 +119,9 @@ export class GameImpl implements Game {
   /** Tiles from nuke blast radii this tick, drained by the renderer. */
   private _nukeImpactQueue: TileRef[] = [];
 
+  /** Skip wire/view bookkeeping when true (AI training / headless harness). */
+  private _headless = false;
+
   constructor(
     private _humans: PlayerInfo[],
     private _nations: Nation[],
@@ -252,7 +255,16 @@ export class GameImpl implements Game {
   }
 
   addUpdate(update: GameUpdate) {
+    if (this._headless) return;
     (this.updates[update.type] as GameUpdate[]).push(update);
+  }
+
+  setHeadless(headless: boolean): void {
+    this._headless = headless;
+  }
+
+  isHeadless(): boolean {
+    return this._headless;
   }
 
   nextUnitID(): number {
@@ -510,19 +522,21 @@ export class GameImpl implements Game {
 
     this.execs.push(...inited);
     this.unInitExecs = unInited;
-    for (const player of this._players.values()) {
-      const update = player.toUpdate(
-        this.playerStatsQuads,
-        this.attackTroopsQuads,
-      );
-      if (update !== null) this.addUpdate(update);
-    }
-    if (this.ticks() % 10 === 0) {
-      this.addUpdate({
-        type: GameUpdateType.Hash,
-        tick: this.ticks(),
-        hash: this.hash(),
-      });
+    if (!this._headless) {
+      for (const player of this._players.values()) {
+        const update = player.toUpdate(
+          this.playerStatsQuads,
+          this.attackTroopsQuads,
+        );
+        if (update !== null) this.addUpdate(update);
+      }
+      if (this.ticks() % 10 === 0) {
+        this.addUpdate({
+          type: GameUpdateType.Hash,
+          tick: this.ticks(),
+          hash: this.hash(),
+        });
+      }
     }
     // Flush pending water conversions + throttled graph rebuild
     const waterChangedTiles = this._waterManager.tick(this._ticks);
@@ -534,6 +548,7 @@ export class GameImpl implements Game {
   }
 
   private recordTileUpdate(tile: TileRef): void {
+    if (this._headless) return;
     // Low 16 bits: tile state, bits 16-23: terrain byte
     this.tileUpdatePairs.push(
       tile,
@@ -569,6 +584,7 @@ export class GameImpl implements Game {
   }
 
   recordMotionPlan(record: MotionPlanRecord): void {
+    if (this._headless) return;
     switch (record.kind) {
       case "grid":
         this.planDrivenUnitIds.add(record.unitId);
@@ -588,6 +604,7 @@ export class GameImpl implements Game {
   }
 
   maybeAddUnitUpdate(unit: Unit): void {
+    if (this._headless) return;
     if (!this.isUnitPlanDriven(unit.id())) {
       this.addUpdate(unit.toUpdate());
     }
@@ -608,7 +625,7 @@ export class GameImpl implements Game {
     return packed;
   }
 
-  private hash(): number {
+  hash(): number {
     let hash = 1;
     this._players.forEach((p) => {
       hash += p.hash();

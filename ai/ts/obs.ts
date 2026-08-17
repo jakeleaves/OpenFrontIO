@@ -1,9 +1,4 @@
-import {
-  Game,
-  Player,
-  PlayerType,
-  UnitType,
-} from "../../src/core/game/Game";
+import { Game, Player, PlayerType, UnitType } from "../../src/core/game/Game";
 import { TileRef } from "../../src/core/game/GameMap";
 import {
   GLOBAL_C,
@@ -15,6 +10,7 @@ import {
   Observation,
   VECTOR_DIM,
 } from "./types";
+import { growthEfficiency } from "./growth";
 
 function set(
   buf: Float32Array,
@@ -29,32 +25,68 @@ function set(
   buf[c * H * W + y * W + x] = v;
 }
 
-function borderCenter(game: Game, player: Player): { x: number; y: number } {
-  const borders = [...player.borderTiles()];
-  if (borders.length === 0) {
-    const tiles = [...player.tiles()];
-    if (tiles.length === 0) {
-      return { x: Math.floor(game.width() / 2), y: Math.floor(game.height() / 2) };
+/** Centroid of border tiles without allocating a spread copy of the set. */
+export function borderCenter(game: Game, player: Player): { x: number; y: number } {
+  const borders = player.borderTiles();
+  if (borders.size === 0) {
+    if (player.numTilesOwned() === 0) {
+      return {
+        x: Math.floor(game.width() / 2),
+        y: Math.floor(game.height() / 2),
+      };
     }
-    const t = tiles[0];
-    return { x: game.x(t), y: game.y(t) };
+    // First owned tile without spreading the full TileSet.
+    let first: TileRef | null = null;
+    player.tiles().forEach((t) => {
+      if (first === null) first = t;
+    });
+    if (first === null) {
+      return {
+        x: Math.floor(game.width() / 2),
+        y: Math.floor(game.height() / 2),
+      };
+    }
+    return { x: game.x(first), y: game.y(first) };
   }
   let sx = 0;
   let sy = 0;
-  for (const t of borders) {
+  let n = 0;
+  borders.forEach((t) => {
     sx += game.x(t);
     sy += game.y(t);
-  }
+    n++;
+  });
   return {
-    x: Math.floor(sx / borders.length),
-    y: Math.floor(sy / borders.length),
+    x: Math.floor(sx / n),
+    y: Math.floor(sy / n),
   };
 }
 
-export function encodeObservation(game: Game, ego: Player): Observation {
-  const global = new Float32Array(GLOBAL_C * GLOBAL_H * GLOBAL_W);
-  const local = new Float32Array(LOCAL_C * LOCAL_H * LOCAL_W);
-  const vector = new Float32Array(VECTOR_DIM);
+export function createObservationBuffers(): Observation {
+  return {
+    global: new Float32Array(GLOBAL_C * GLOBAL_H * GLOBAL_W),
+    local: new Float32Array(LOCAL_C * LOCAL_H * LOCAL_W),
+    vector: new Float32Array(VECTOR_DIM),
+  };
+}
+
+/**
+ * Encode observation into `into` when provided (zeroed then filled), otherwise
+ * allocate fresh buffers. Training should pass a reused Observation.
+ */
+export function encodeObservation(
+  game: Game,
+  ego: Player,
+  into?: Observation,
+): Observation {
+  const global = into?.global ?? new Float32Array(GLOBAL_C * GLOBAL_H * GLOBAL_W);
+  const local = into?.local ?? new Float32Array(LOCAL_C * LOCAL_H * LOCAL_W);
+  const vector = into?.vector ?? new Float32Array(VECTOR_DIM);
+  if (into) {
+    global.fill(0);
+    local.fill(0);
+    vector.fill(0);
+  }
 
   const mw = game.width();
   const mh = game.height();
@@ -63,14 +95,8 @@ export function encodeObservation(game: Game, ego: Player): Observation {
 
   for (let gy = 0; gy < GLOBAL_H; gy++) {
     for (let gx = 0; gx < GLOBAL_W; gx++) {
-      const mx = Math.min(
-        mw - 1,
-        Math.floor(((gx + 0.5) / GLOBAL_W) * mw),
-      );
-      const my = Math.min(
-        mh - 1,
-        Math.floor(((gy + 0.5) / GLOBAL_H) * mh),
-      );
+      const mx = Math.min(mw - 1, Math.floor(((gx + 0.5) / GLOBAL_W) * mw));
+      const my = Math.min(mh - 1, Math.floor(((gy + 0.5) / GLOBAL_H) * mh));
       const r = game.ref(mx, my);
       if (game.isWater(r)) {
         set(global, 4, gy, gx, GLOBAL_C, GLOBAL_H, GLOBAL_W, 1);
@@ -131,6 +157,7 @@ export function encodeObservation(game: Game, ego: Player): Observation {
 
   const { x: cx, y: cy } = borderCenter(game, ego);
   const half = Math.floor(LOCAL_W / 2);
+  const borderTiles = ego.borderTiles();
   for (let ly = 0; ly < LOCAL_H; ly++) {
     for (let lx = 0; lx < LOCAL_W; lx++) {
       const mx = cx + lx - half;
@@ -152,7 +179,7 @@ export function encodeObservation(game: Game, ego: Player): Observation {
       if (game.hasFallout(r)) {
         set(local, 6, ly, lx, LOCAL_C, LOCAL_H, LOCAL_W, 1);
       }
-      if (ego.borderTiles().has(r)) {
+      if (borderTiles.has(r)) {
         set(local, 7, ly, lx, LOCAL_C, LOCAL_H, LOCAL_W, 1);
       }
     }
@@ -160,10 +187,47 @@ export function encodeObservation(game: Game, ego: Player): Observation {
 
   const maxT = Math.max(1, game.config().maxTroops(ego));
   const land = Math.max(1, game.numLandTiles());
-  const enemy = game
-    .players()
-    .filter((p) => p !== ego && p.type() !== PlayerType.Bot && p.isAlive())
-    .sort((a, b) => b.troops() - a.troops())[0];
+  const opponents: Player[] = [];
+  for (const p of game.players()) {
+    if (p !== ego && p.type() !== PlayerType.Bot && p.isAlive()) {
+      opponents.push(p);
+    }
+  }
+  let enemy: Player | undefined;
+  let bestTroops = -1;
+  for (const p of opponents) {
+    const t = p.troops();
+    if (t > bestTroops) {
+      bestTroops = t;
+      enemy = p;
+    }
+  }
+
+  let enemyTilesTotal = 0;
+  let enemyTroopsTotal = 0;
+  let adjacentEnemies = 0;
+  const bordering = new Set<string>();
+  borderTiles.forEach((border) => {
+    game.forEachNeighbor(border, (neighbor) => {
+      if (!game.isLand(neighbor) || !game.hasOwner(neighbor)) return;
+      const owner = game.owner(neighbor);
+      if (owner.isPlayer() && owner !== ego && owner.isAlive()) {
+        bordering.add(owner.id());
+      }
+    });
+  });
+  for (const p of opponents) {
+    enemyTilesTotal += p.numTilesOwned();
+    enemyTroopsTotal += p.troops();
+    if (bordering.has(p.id())) adjacentEnemies++;
+  }
+
+  let better = 0;
+  for (const p of opponents) {
+    if (p.numTilesOwned() > ego.numTilesOwned()) better++;
+  }
+  const placement = better + 1;
+  const contenders = opponents.length + (ego.isAlive() ? 1 : 0);
 
   vector[0] = Math.log1p(Number(ego.gold()));
   vector[1] = Number(game.config().goldAdditionRate(ego));
@@ -183,11 +247,62 @@ export function encodeObservation(game: Game, ego: Player): Observation {
   vector[15] = ego.isTraitor() ? 1 : 0;
   vector[16] = ego.incomingAttacks().length;
   vector[17] = ego.outgoingAttacks().length;
+  vector[18] = enemy ? enemy.troops() / Math.max(1, ego.troops()) : 0;
+  vector[19] = enemy ? enemy.numTilesOwned() / land : 0;
+  vector[20] = enemy?.outgoingAttacks().length ?? 0;
+  vector[21] = enemy?.units(UnitType.SAMLauncher).length ?? 0;
+  vector[22] = enemy?.units(UnitType.MissileSilo).length ?? 0;
+  if (enemy) {
+    const enemyCenter = borderCenter(game, enemy);
+    const dx = cx - enemyCenter.x;
+    const dy = cy - enemyCenter.y;
+    vector[23] = Math.sqrt(dx * dx + dy * dy) / Math.hypot(mw, mh);
+  }
+
+  const growth = growthEfficiency(ego.troops(), maxT);
+  vector[24] = growth.rate / Math.max(1, maxT * 0.01); // normalized regen
+  vector[25] = growth.efficiency; // 1 at peak growth ratio
+  vector[26] = growth.optimalRatio;
+  vector[27] = ego.troops() / maxT - growth.optimalRatio; // signed error vs peak
+
+  // FFA pressure features (slots beyond legacy 1v1 vector layout).
+  vector[28] = opponents.length / 72;
+  vector[29] = enemyTilesTotal / land;
+  vector[30] = enemyTroopsTotal / Math.max(1, ego.troops() + enemyTroopsTotal);
+  vector[31] = adjacentEnemies / Math.max(1, opponents.length);
+  vector[32] = placement / Math.max(1, contenders);
+  vector[33] =
+    ego.numTilesOwned() / Math.max(1, enemyTilesTotal + ego.numTilesOwned());
+  vector[34] =
+    ego.incomingAttacks().reduce((n, a) => n + a.troops(), 0) /
+    Math.max(1, ego.troops());
 
   return { global, local, vector };
 }
 
+function f32ToBase64(arr: Float32Array): string {
+  return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString(
+    "base64",
+  );
+}
+
+/** Encode observation as base64 Float32 tensors (wire format v2). */
 export function obsToJson(obs: Observation) {
+  return {
+    encoding: "f32b64" as const,
+    global: f32ToBase64(obs.global),
+    local: f32ToBase64(obs.local),
+    vector: f32ToBase64(obs.vector),
+    shapes: {
+      global: [GLOBAL_C, GLOBAL_H, GLOBAL_W],
+      local: [LOCAL_C, LOCAL_H, LOCAL_W],
+      vector: VECTOR_DIM,
+    },
+  };
+}
+
+/** Legacy Array-of-floats encoding (tests / demos that need JSON numbers). */
+export function obsToJsonLegacy(obs: Observation) {
   return {
     global: Array.from(obs.global),
     local: Array.from(obs.local),

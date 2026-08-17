@@ -781,6 +781,15 @@ export interface Game extends GameMap {
   inSpawnPhase(): boolean;
   endSpawnPhase(): void;
   executeNextTick(): GameUpdates;
+  /**
+   * When true, skip client/wire bookkeeping (tile packs, player updates,
+   * periodic hash, unit/motion-plan updates). Simulation state is unchanged.
+   * Used by headless AI training and optional perf harnesses.
+   */
+  setHeadless(headless: boolean): void;
+  isHeadless(): boolean;
+  /** Deterministic state hash (same value as the every-10-tick Hash update). */
+  hash(): number;
   drainPackedTileUpdates(): Uint32Array;
   recordMotionPlan(record: MotionPlanRecord): void;
   drainPackedMotionPlans(): Uint32Array | null;

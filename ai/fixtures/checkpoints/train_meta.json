@@ -1,7 +1,0 @@
-{
-  "map": "plains",
-  "bc_steps": 1,
-  "appo_steps": 1,
-  "league_checkpoints": 1,
-  "env": "ts"
-}

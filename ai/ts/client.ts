@@ -37,17 +37,7 @@ function parseArgs() {
 }
 
 function heuristic(tick: number, gold: number): FactorizedAction {
-  if (tick % 40 === 0) {
-    return {
-      actionType: ActionType.ATTACK,
-      targetPlayer: tick < 200 ? 0 : 1,
-      cellX: 16,
-      cellY: 8,
-      troopFrac: 2,
-      buildType: 0,
-    };
-  }
-  if (tick % 100 === 50 && gold > 200_000) {
+  if (gold > 250_000 && tick % 80 < 10) {
     return {
       actionType: ActionType.BUILD,
       targetPlayer: 0,
@@ -57,12 +47,14 @@ function heuristic(tick: number, gold: number): FactorizedAction {
       buildType: 0,
     };
   }
+  // Always expand; periodically punch the Impossible Nation.
+  const attackNation = tick > 250 && Math.floor(tick / 50) % 3 === 2;
   return {
-    actionType: ActionType.NOOP,
-    targetPlayer: 0,
-    cellX: 0,
-    cellY: 0,
-    troopFrac: 0,
+    actionType: ActionType.ATTACK,
+    targetPlayer: attackNation ? 1 : 0,
+    cellX: 16,
+    cellY: 8,
+    troopFrac: attackNation ? 49 : 34, // ~50% / ~35%
     buildType: 0,
   };
 }

@@ -176,7 +176,8 @@ export class GameRunner {
     // thread doesn't structured-clone an identical ~all-players record on
     // every other tick.
     let viewDataChanged = false;
-    if (this.game.inSpawnPhase()) {
+    const headless = this.game.isHeadless();
+    if (!headless && this.game.inSpawnPhase()) {
       for (const p of this.game.players()) {
         if (p.type() !== PlayerType.Human && p.type() !== PlayerType.Nation) {
           continue;
@@ -189,14 +190,34 @@ export class GameRunner {
 
     const spawnJustEnded = wasInSpawnPhase && !this.game.inSpawnPhase();
     if (
-      spawnJustEnded ||
-      this.game.ticks() < 3 ||
-      this.game.ticks() % 30 === 0
+      !headless &&
+      (spawnJustEnded ||
+        this.game.ticks() < 3 ||
+        this.game.ticks() % 30 === 0)
     ) {
       for (const p of this.game.players()) {
         this.playerViewData[p.id()] = placeName(this.game, p);
       }
       viewDataChanged = true;
+    }
+
+    if (headless) {
+      // Drain/discard packed buffers so they don't grow unbounded; the empty
+      // callback never ships them to a client.
+      this.game.drainPackedTileUpdates();
+      this.game.drainPackedMotionPlans();
+      this.game.drainPackedPlayerUpdates();
+      this.game.drainPackedAttackUpdates();
+      this.game.drainNukeImpacts();
+      this.callBack({
+        tick: this.game.ticks(),
+        packedTileUpdates: new Uint32Array(0),
+        updates: updates,
+        tickExecutionDuration: tickExecutionDuration,
+        pendingTurns: pendingTurns ?? 0,
+      });
+      this.isExecuting = false;
+      return true;
     }
 
     const packedTileUpdates = this.game.drainPackedTileUpdates();

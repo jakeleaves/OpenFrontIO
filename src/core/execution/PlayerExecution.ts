@@ -27,6 +27,8 @@ export class PlayerExecution implements Execution {
   private active = true;
   // Reusable neighbor buffer to avoid closures/allocation in cluster checks.
   private nbuf: TileRef[] = [0, 0, 0, 0];
+  // Reused cluster-list container across calcs (inner arrays still allocated).
+  private readonly clusterScratch: TileRef[][] = [];
 
   constructor(private player: Player) {}
 
@@ -153,6 +155,11 @@ export class PlayerExecution implements Execution {
     );
     if (surroundedBy && !surroundedBy.isFriendly(this.player)) {
       this.removeCluster(largestCluster);
+    }
+
+    // Single border component: no other enclaves to check.
+    if (clusters.length === 1) {
+      return;
     }
 
     // Process remaining clusters
@@ -343,14 +350,17 @@ export class PlayerExecution implements Execution {
     const currentGen = this.bumpGeneration();
     const visited = state.visited;
 
-    const clusters: TileRef[][] = [];
+    const clusters = this.clusterScratch;
+    clusters.length = 0;
 
     // Set.forEach instead of for..of: iterating a large Set allocates an
     // iterator-result object per element, and border sets can be huge.
     const neighborFn = (tile: TileRef, cb: (neighbor: TileRef) => void) =>
       this.mg.forEachNeighborWithDiag(tile, cb);
     const includeFn = (tile: TileRef) => borderTiles.has(tile);
+    let done = false;
     borderTiles.forEach((startTile) => {
+      if (done) return;
       if (visited[startTile] === currentGen) return;
 
       const cluster = this.floodFillWithGen(
@@ -361,6 +371,12 @@ export class PlayerExecution implements Execution {
         includeFn,
       );
       clusters.push(cluster);
+
+      // Common case: one connected border component. First fill visits every
+      // border tile — skip remaining seeds and surround checks for enclaves.
+      if (cluster.length === borderTiles.size) {
+        done = true;
+      }
     });
     return clusters;
   }
